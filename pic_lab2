@@ -9,29 +9,7 @@
 #include <pic16f688.h>
 #include <stdbool.h>
 //initialize ADC
-/*
-*
-*
-CHS<2:0>: Analog Channel Select bits
-000 = AN0
-001 = AN1
-010 = AN2
-011 = AN3
-100 = AN4
-101 = AN5
-110 = AN6
-111 = AN7
-*
-*
-ADCS<2:0>: A/D Conversion Clock Select bits
-000 = FOSC/2
-001 = FOSC/8
-010 = FOSC/32
-x11 = FRC (clock derived from a dedicated internal oscillator = 500 kHz max)
-100 = FOSC/4
-101 = FOSC/16
-110 = FOSC/64
-*/
+
 //Initialize ADC
 /*
 STROBE RA2// FOR US IS RA4
@@ -58,8 +36,9 @@ void adc_init() {
     TRISC = 0b00111101; // Set RC2-5 as digital input and the rest is output
     ADCON1 = 0b10000001; // Implement A/D, 000 = FOSC/2
     ADON = 1; //ADC bit enabled
-    PORTA = 0b00000000;
-   // PORTC = 0b00000000;
+    //PORTA = 0b00000000;
+ //   PORTCbits.RC0 = 1;
+    PORTC = 0b00000001;
 }
 //read ADC value
 unsigned int receive_msg() {
@@ -67,11 +46,7 @@ unsigned int receive_msg() {
     // unsigned first=0;//LED on 0 means off 1 means on
     // unsigned second=0;//LED off 0 means on 1 means off
     unsigned int STROBE = 0;
-   
-//    if(PORTCbits.RC0 == 1);
-//    {
-//        S = 1;
-//    }
+
     STROBE = PORTCbits.RC0;
     // while(STROBE == hi);
     // while(STROBE == lo);
@@ -120,15 +95,17 @@ int main(int argc, char** argv) {
     message = receive_msg();
     //Read the value and do the compare
 
-    if (message == 1) { //Voltage value ex 42 = 4.2 volts
+    if (message == hi) { //Voltage value ex 42 = 4.2 volts
 
-    PORTCbits.RC1 = 1; //LED ON @ RC1
+    PORTCbits.RC1 = 0; //LED OFF @ RC1
 
        }
    
     else
     {
-        PORTCbits.RC1 = 0; //LED OFF @ RC1
+       
+        PORTCbits.RC1 = 1; //LED ON @ RC1
+        
     }
 }
 // unsigned char msg;
