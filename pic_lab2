@@ -86,8 +86,7 @@ unsigned int conv_adc2volt(void) {
     return voltage;
 }
 
-void ACK(void)
-{
+void ACK(void) {
     PORTCbits.RC2 = 0;
     PORTCbits.RC3 = 1;
     PORTCbits.RC4 = 1;
@@ -106,55 +105,67 @@ int main(int argc, char** argv) {
         READ = 0;
         RESET = 0;
         STROBE = receive_msg();
-
-        if (STROBE == lo)
+        while(STROBE == hi)
         {
-             PORTCbits.RC1 = 1; //LED ON
+             if (conv_adc2volt() > 42) //Voltage value ex 42 = 4.2 volts
+        {
+
+            PORTCbits.RC1 = 1; //LED ON @ RC1
+
+        } else {
+
+            PORTCbits.RC1 = 0; //LED OFF @ RC1
+
         }
-        while (STROBE == hi);
-        while (STROBE == lo);
-        while (STROBE == hi) {
-            if (PORTCbits.RC5 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC3 == 0 && PORTCbits.RC2 == 0) {
-                /*
-                 * ---------R E S E T------------
-                 */
-                RESET = 1;
-                adc_init();
-            }
-            if (PORTCbits.RC5 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC3 == 0 && PORTCbits.RC2 == 1) {
-                /*
-                 * --------- P I N G------------
-                 */
-                PING = 1;
-            }
-            if (PORTCbits.RC5 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC3 == 1 && PORTCbits.RC2 == 0) {
-                //R E A D adc value
-                READ = 1;
-                adc_read();
-
-                //return adc value to
-            }
+            
         }
-        while (STROBE == lo) {
-
-            if (PING == 1) {
-                TRISC = 0b00000000; // RC is output
-                ACK();
-               
-            }
-            if(READ == 1){
-                ACK();
-            }
-            if(RESET == 1){
-                ACK();
-            }
+        
+        if (STROBE == lo) {
+            PORTCbits.RC1 = 1; //LED ON
         }
-        while (STROBE == hi);
+            //   while (STROBE == hi);
+            while (STROBE == lo); //wait
+            while (STROBE == hi) {// read
+                if (PORTCbits.RC5 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC3 == 0 && PORTCbits.RC2 == 0) {
+                    /*
+                     * ---------R E S E T------------
+                     */
+                    RESET = 1;
+                    adc_init();
+                }
+                if (PORTCbits.RC5 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC3 == 0 && PORTCbits.RC2 == 1) {
+                    /*
+                     * --------- P I N G------------
+                     */
+                    PING = 1;
+                }
+                if (PORTCbits.RC5 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC3 == 1 && PORTCbits.RC2 == 0) {
+                    //R E A D adc value
+                    READ = 1;
+                    adc_read();
 
-     
-        TRISC = 0b00111101; //back to normal
+                    //return adc value to
+                }
+            }
+            while (STROBE == lo) {//write back
+
+                if (PING == 1) {
+                    TRISC = 0b00000000; // RC is output
+                    ACK();
+
+                }
+                if (READ == 1) {
+                    ACK();
+                }
+                if (RESET == 1) {
+                    ACK();
+                }
+            }
+            while (STROBE == hi);// wait
 
 
+            TRISC = 0b00111101; //back to normal
+        
 
     }
 
