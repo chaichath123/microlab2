@@ -87,33 +87,41 @@ unsigned int conv_adc2volt(void) {
 int main(int argc, char** argv) {
     adc_init(); //Initial The adc function
     unsigned int STROBE = 0;
-
+    unsigned int PING = 0;
     while (1) {
+
+    PING = 0;
     STROBE = receive_msg();
-    
+
     while(STROBE == hi);
     while(STROBE == lo);
     while(STROBE == hi){
-        
+
         if( PORTCbits.RC2 == 1 && PORTCbits.RC3 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC5 == 0)
         {
-            //ACK
+            PING = 1;
         }
         //read message
-        
+
     }
     while(STROBE == lo){
-        TRISC = 0b00000000;// RC is output
-        PORTCbits.RC2 = 0;
-        PORTCbits.RC3 = 1;
-        PORTCbits.RC4 = 1;
-        PORTCbits.RC5 = 1;
+        
+        if(PING == 1)
+        {
+            TRISC = 0b00000000;// RC is output
+            PORTCbits.RC2 = 0;
+            PORTCbits.RC3 = 1;
+            PORTCbits.RC4 = 1;
+            PORTCbits.RC5 = 1;
+            PORTCbits.RC1 = 1; //LED ON
+        }
     }
-    
-   
+    while(STROBE == hi);
+
+    PORTCbits.RC1 = 0;
     TRISC = 0b00111101;//back to normal
-    
-    
+
+
 }
 
 return (EXIT_SUCCESS);
