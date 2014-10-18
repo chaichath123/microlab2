@@ -107,6 +107,10 @@ int main(int argc, char** argv) {
         RESET = 0;
         STROBE = receive_msg();
 
+        if (STROBE == lo)
+        {
+             PORTCbits.RC1 = 1; //LED ON
+        }
         while (STROBE == hi);
         while (STROBE == lo);
         while (STROBE == hi) {
@@ -128,7 +132,7 @@ int main(int argc, char** argv) {
                 READ = 1;
                 adc_read();
 
-                //return adc value to 
+                //return adc value to
             }
         }
         while (STROBE == lo) {
@@ -136,7 +140,7 @@ int main(int argc, char** argv) {
             if (PING == 1) {
                 TRISC = 0b00000000; // RC is output
                 ACK();
-                PORTCbits.RC1 = 1; //LED ON
+               
             }
             if(READ == 1){
                 ACK();
@@ -147,7 +151,7 @@ int main(int argc, char** argv) {
         }
         while (STROBE == hi);
 
-        PORTCbits.RC1 = 0;
+     
         TRISC = 0b00111101; //back to normal
 
 
