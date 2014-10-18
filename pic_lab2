@@ -43,11 +43,8 @@ void adc_init() {
 //read ADC value
 unsigned int receive_msg() {
     // set_receive();// already been done
-    // unsigned first=0;//LED on 0 means off 1 means on
-    // unsigned second=0;//LED off 0 means on 1 means off
-    unsigned int STROBE = 0;
-
-    STROBE = PORTCbits.RC0;
+    unsigned int strobe_status = 0;
+    strobe_status = PORTCbits.RC0;
     // while(STROBE == hi);
     // while(STROBE == lo);
     // while(STROBE == hi){
@@ -62,7 +59,7 @@ unsigned int receive_msg() {
     // 3.read the data
     // 4.wait strobe high
     // 5.return the data
-    return STROBE;
+    return strobe_status;
 }
 unsigned int adc_read(void) {
     /*
@@ -89,33 +86,35 @@ unsigned int conv_adc2volt(void) {
 
 int main(int argc, char** argv) {
     adc_init(); //Initial The adc function
-    unsigned int message = 0;
+    unsigned int STROBE = 0;
 
     while (1) {
-    message = receive_msg();
-    //Read the value and do the compare
-
-    if (message == hi) { //Voltage value ex 42 = 4.2 volts
-
-    PORTCbits.RC1 = 0; //LED OFF @ RC1
-
-       }
-   
-    else
-    {
-       
-        PORTCbits.RC1 = 1; //LED ON @ RC1
+    STROBE = receive_msg();
+    
+    while(STROBE == hi);
+    while(STROBE == lo);
+    while(STROBE == hi){
+        
+        if( PORTCbits.RC2 == 1 && PORTCbits.RC3 == 0 && PORTCbits.RC4 == 0 && PORTCbits.RC5 == 0)
+        {
+            //ACK
+        }
+        //read message
         
     }
+    while(STROBE == lo){
+        TRISC = 0b00000000;// RC is output
+        PORTCbits.RC2 = 0;
+        PORTCbits.RC3 = 1;
+        PORTCbits.RC4 = 1;
+        PORTCbits.RC5 = 1;
+    }
+    
+   
+    TRISC = 0b00111101;//back to normal
+    
+    
 }
-// unsigned char msg;
-// while(1)
-// {
-// msg=receive_msg();
-// if(msg == 0xd)
-// PORTCbits.RC0 = 1; //light the LED
-// else
-// PORTCbits.RC0 = 0;
-// }
+
 return (EXIT_SUCCESS);
 }
