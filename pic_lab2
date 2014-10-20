@@ -156,6 +156,11 @@ int main(int argc, char** argv) {
                 }
                 if (READ == 1) {
                     ACK();
+                    /*
+                     * ADC CONVERSION
+                     * ADRESH and ADRESL 0-1013 
+                     *
+                     */
                 }
                 if (RESET == 1) {
                     ACK();
