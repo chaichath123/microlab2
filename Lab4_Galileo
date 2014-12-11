@@ -16,14 +16,11 @@
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
 #include <pthread.h>
-
+#include <curl/curl.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-
-
-
 
 #define Strobe (26) // IO8
 #define GP_4 (28) // IO4
@@ -42,13 +39,14 @@
 #define RTC_SCL  (20)  //A5
 
 #define NUM_THREADS 5
+
+
+char *STATUS;
+int ADC[3];
+
 /* thread id
 */
-
 pthread_t tid[NUM_THREADS];
-
-
-
 
 
 int fileHandleGPIO_4;
@@ -68,6 +66,7 @@ void delay(int milliseconds)
     while( (now-then) < pause )
         now = clock();
 }
+
 void decimal_to_binary(int decimal, char *bin_array)
 {
 	int k = 3;
@@ -306,64 +305,96 @@ int bus_read(){
 	return binary_to_decimal(bits_Buffer);
 }
 
-void *MSG_PING()
+void *sensor(void *cmd){
+	if (cmd == "1"){//ping
+		int PIC_Response = 0;
+
+		bus_write(1);
+		delay(10);
+		PIC_Response = bus_read();
+
+		//14 = E
+		if (PIC_Response == 14)
+		{
+			STATUS = "PIC+PING";
+			printf("Received PING Acknowledgement from PIC\n\n\n");
+			//STATUS[0] = "PIC_PING_ACK";
+
+		}
+		else
+		{
+			printf("Error PING to PIC\n\n\n");
+		}
+		cmd == "5";
+
+	}
+
+	if (cmd == "2"){//get
+		int i;
+		int bit_nibble[4]; //4 bit nibble
+
+
+		bus_write(2);
+		delay(10);
+
+		for (i = 0; i < 4; i++)
+		{
+			bit_nibble[i] = bus_read();
+			delay(10);
+		}
+		printf("ADC value: ");
+		STATUS = "ADC+OK";
+		for (i = 0; i < 3; i++)
+		{
+			printf("%X", bit_nibble[i]);
+			ADC[i] = bit_nibble[i];
+			//strcat(ADC[i], bit_nibble[i]);
+		}
+		
+		printf("\n");
+		cmd == "5";
+	}
+
+
+	if (cmd == "0"){//reset
+		int PIC_Response = 0;
+
+		bus_write(0);
+		delay(10);
+		PIC_Response = bus_read();
+		/* There will be a new fuction that will call bus_read or bus write
+		*/
+
+
+		if (PIC_Response == 14)
+		{
+			STATUS = "PIC+RESET";
+			printf("Received RESET Acknowledgement from PIC\n\n\n");
+		}
+		else{
+			printf("Error RESET to PIC\n\n\n");
+		}
+		cmd == "5";
+
+	}
+	
+}
+
+void MSG_PING(void)
 { 
-	int PIC_Response = 0; 
-
-	bus_write(1); 
-	delay(10); 
-	PIC_Response = bus_read(); 
-
-	//14 = E
-	if (PIC_Response == 14) 
-	{
-		printf("Received PING Acknowledgement from PIC\n\n\n");
-	}
-	else
-	{ 
-		printf("Error PING to PIC\n\n\n");
-	}
+	pthread_create(&tid[1], NULL, &sensor, "1");
 	
 }
 //14 = E
-void *MSG_RESET()
+void MSG_RESET(void)
 { 
-	int PIC_Response = 0; 
-
-	bus_write(0); 
-	delay(10); 
-	PIC_Response = bus_read(); 
-
-	if (PIC_Response == 14) 
-	{
-		printf("Received RESET Acknowledgement from PIC\n\n\n");
-	}
-	else{ 
-		printf("Error RESET to PIC\n\n\n");;
-	}
-	
+	 pthread_create(&tid[3], NULL, &sensor, "0");
 }
 
-void *MSG_GET(void){ 
-	int i; 
-	int bit_nibble[4]; //4 bit nibble
-	
+void MSG_GET(void){ 
 
-	bus_write(2); 
-	delay(10); 
-
-	for (i = 0; i < 4; i++)
-	{ 
-		bit_nibble[i] = bus_read(); 
-		delay(10); 
-	}
-			printf("ADC value: ");
-		
-			for (i = 0; i < 3; i++)
-				{   
-					printf("%X", bit_nibble[i]);
-				}
-			printf("\n");
+	//call sensor
+	pthread_create(&tid[2], NULL, &sensor, "2");
 
 }
 
@@ -454,6 +485,58 @@ void i2cTime()
 }
 
 
+
+void HTTP_GET(const char* url){
+	CURL *curl;
+	curl = curl_easy_init();
+	if (curl) {
+		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, url);
+	}
+}
+
+
+
+void serveItUp(void)
+{
+
+	/* Since this program depends on libcurl, you may need to
+	* install libcurl4-gnutls-dev.
+	*
+	* On Linux Mint, this can be done by running:
+	* sudo apt-get install libcurl4-gnutls-dev
+	*/
+
+	const char* hostname = "129.63.205.75";
+	const int   port = 8000;
+	const int   id = 6;
+	const char* password = "jcn";
+	const char* name = "IMBANANA";
+	const int   adcval = ADC;
+	const char* status = STATUS;
+	const char* timestamp = "20141116-09:12:34";
+
+
+
+
+	char buf[1024];
+	snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%d&status=%s&timestamp=%s",
+		hostname,
+		port,
+		id,
+		password,
+		name,
+		adcval,
+		status,
+		timestamp);
+	HTTP_GET(buf);
+	
+	//return 0;
+}
+
+
 void *command()
 {
 	int input;
@@ -471,27 +554,23 @@ void *command()
 		switch (input)
 		{
 		case 0:
-			//MSG_RESET(); //RESET COMMAND
-			pthread_create(&tid[1],NULL,MSG_RESET,NULL);
-			pthread_join(tid[1],NULL);
+			MSG_RESET(); //RESET COMMAND
+			delay(1000);
+			//STATUS = "PIC+RESET";
+			serveItUp();
 			break;
 		case 1:
 			MSG_PING(); // PING COMMAND
 			//pthread_create(&tid[2],NULL,MSG_PING,NULL);
 			//pthread_join(tid[2]);
+			delay(1000);
+			serveItUp();
 			break;	
 		case 2:         //GET COMMAND
-			for (i = 0; i <3; i++)
-			{
-				/*Thread for Message GET*/
 				MSG_GET();
-				//pthread_create(&tid[3],NULL,MSG_GET,NULL);
-
-				/*THread for I2C*/
 				i2cTime();
-				//pthread_create(&tid[4],NULL,i2cTime,NULL);
 				delay(1000);
-			}
+				serveItUp();
 			break;
 		case 3:
 			printf("Thanks bye\n");
@@ -504,6 +583,18 @@ void *command()
 
 	}
 }
+
+/*
+Sensors control ()
+
+- it passes in value of something....
+- it will be determining what commands will be input.
+
+- will be called in by msg_get or so on.....
+
+
+*/
+
 
 
 
@@ -520,7 +611,7 @@ int main(void)
 		fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT, GPIO_STRONG);
 		writeGPIO(fileHandleGPIO_S, 1); 
 		
-
+		serveItUp();
 		/*Semaphore starter
 		*/
 		
@@ -548,4 +639,3 @@ int main(void)
 		
 		return 0;
 }
-
