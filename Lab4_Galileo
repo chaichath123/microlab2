@@ -38,7 +38,7 @@
 #define RTC_SDA  (21) //A4
 #define RTC_SCL  (20)  //A5
 
-#define NUM_THREADS 5
+#define NUM_THREADS 20
 
 
 char *STATUS;
@@ -398,7 +398,6 @@ void MSG_GET(void){
 
 }
 
-
 char bin2bcd(char binary_value){
 
   char temp;
@@ -417,7 +416,6 @@ char bin2bcd(char binary_value){
   }
   return(retval);
 }
-
 
 char bcd2bin(char bcd_value){
 
@@ -484,8 +482,6 @@ void i2cTime()
 	close(fd);
 }
 
-
-
 void HTTP_GET(const char* url){
 	CURL *curl;
 	curl = curl_easy_init();
@@ -497,12 +493,9 @@ void HTTP_GET(const char* url){
 	}
 }
 
-
-
-void serveItUp(void)
+void *serveItUp()
 {
-
-	/* Since this program depends on libcurl, you may need to
+		/* Since this program depends on libcurl, you may need to
 	* install libcurl4-gnutls-dev.
 	*
 	* On Linux Mint, this can be done by running:
@@ -519,8 +512,6 @@ void serveItUp(void)
 	const char* timestamp = "20141116-09:12:34";
 
 
-
-
 	char buf[1024];
 	snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%d&status=%s&timestamp=%s",
 		hostname,
@@ -535,7 +526,7 @@ void serveItUp(void)
 	
 	//return 0;
 }
-
+// HTTP_GET INSIDE
 
 void *command()
 {
@@ -557,20 +548,21 @@ void *command()
 			MSG_RESET(); //RESET COMMAND
 			delay(1000);
 			//STATUS = "PIC+RESET";
-			serveItUp();
+			//serveItUp();
+			pthread_create(&tid[4], NULL, serveItUp, NULL);
 			break;
 		case 1:
 			MSG_PING(); // PING COMMAND
-			//pthread_create(&tid[2],NULL,MSG_PING,NULL);
-			//pthread_join(tid[2]);
 			delay(1000);
-			serveItUp();
+			//serveItUp();
+			pthread_create(&tid[4], NULL, serveItUp, NULL);
 			break;	
 		case 2:         //GET COMMAND
-				MSG_GET();
-				i2cTime();
-				delay(1000);
-				serveItUp();
+			MSG_GET();
+			i2cTime();
+			delay(1000);
+			pthread_create(&tid[4], NULL, serveItUp, NULL);
+			//serveItUp();
 			break;
 		case 3:
 			printf("Thanks bye\n");
@@ -594,8 +586,6 @@ Sensors control ()
 
 
 */
-
-
 
 
 int main(void)
