@@ -42,19 +42,45 @@
 
 
 char *STATUS;
-int ADC[3];
+float ADC;
+char TIME[1024];
 
-/* thread id
+/*================== thread id===============
 */
 pthread_t tid[NUM_THREADS];
+pthread_mutex_t time_mutex;
+pthread_mutex_t adc_mutex;
 
+//=============================================
 
 int fileHandleGPIO_4;
 int fileHandleGPIO_5;
 int fileHandleGPIO_6;
 int fileHandleGPIO_7;
 int fileHandleGPIO_S;
+struct MemoryStruct {
+	char *memory;
+	size_t size;
+};
+static size_t
+WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+	size_t realsize = size * nmemb;
+	struct MemoryStruct *mem = (struct MemoryStruct *)userp;
 
+	mem->memory = realloc(mem->memory, mem->size + realsize + 1);
+	if (mem->memory == NULL) {
+		/* out of memory! */
+		printf("not enough memory (realloc returned NULL)\n");
+		return 0;
+	}
+
+	memcpy(&(mem->memory[mem->size]), contents, realsize);
+	mem->size += realsize;
+	mem->memory[mem->size] = 0;
+
+	return realsize;
+}
 //utility functions
 void delay(int milliseconds)
 {
@@ -330,10 +356,10 @@ void *sensor(void *cmd){
 	}
 
 	if (cmd == "2"){//get
+		
 		int i;
 		int bit_nibble[4]; //4 bit nibble
-
-
+		float voltage = 0;
 		bus_write(2);
 		delay(10);
 
@@ -347,10 +373,16 @@ void *sensor(void *cmd){
 		for (i = 0; i < 3; i++)
 		{
 			printf("%X", bit_nibble[i]);
-			ADC[i] = bit_nibble[i];
+			//ADC[i] = bit_nibble[i];
+			voltage += bit_nibble[i];
+		//	voltage += pow(2, bit_nibble[i]);
+			ADC += 1 ;
 			//strcat(ADC[i], bit_nibble[i]);
 		}
-		
+	//	voltage += pow(2, bit_nibble[0]);
+		voltage = voltage / 7;
+		ADC = voltage;
+		printf("\nThe voltage level:%f\n", voltage);
 		printf("\n");
 		cmd == "5";
 	}
@@ -398,6 +430,7 @@ void MSG_GET(void){
 
 }
 
+
 char bin2bcd(char binary_value){
 
   char temp;
@@ -430,12 +463,14 @@ char bcd2bin(char bcd_value){
 void i2cTime()
 {
 
-		int i;
-        int r;
-        int fd;
-		int x;
-        char command[2];
-        char value[8];
+	int i;
+	int r;
+	int fd;
+	int x;
+	int WTF;
+	char command[2];
+	char value[8];
+	char year[1024];
 
         char *dev = "/dev/i2c-0";
         int addr = 0x68;
@@ -477,25 +512,66 @@ void i2cTime()
 				
 				
                 printf("System Time:%02X:%02X:%02X, Day:%X,  %X/%X/20%X\n", value[2],value[1],value[0],value[3],value[5],value[4], value[6]);
-				
+				printf("Time for upload:\n");
+			    //strcpy(year, "20");
+				//strcat(year, value[6]);
+				//int WTF = binary_to_decimal((char *)value[6]);
+				//printf("%c\n\n\n\n\n\n\n", year);
+				WTF = sprintf(TIME,"20%X%X%X-%02X:%02X:%02X", value[6], value[5],value[4], value[2], value[1], value[0]);
+				//printf("%s",TIME);
 		
 	close(fd);
 }
 
 void HTTP_GET(const char* url){
 	CURL *curl;
+	CURLcode res;
+
+	struct MemoryStruct chunk;
+
+	chunk.memory = malloc(1);  /* will be grown as needed by the realloc above */
+	chunk.size = 0;    /* no data at this point */
+
+	curl_global_init(CURL_GLOBAL_ALL);
+
 	curl = curl_easy_init();
 	if (curl) {
 		curl_easy_setopt(curl, CURLOPT_URL, url);
-		curl_easy_perform(curl);
+		/* send all data to this function  */
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+
+		/* we pass our 'chunk' struct to the callback function */
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+		//get it
+		res = curl_easy_perform(curl);
+		/* check for errors */
+		if (res != CURLE_OK) {
+			fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(res));
+		}
+		else {
+			/*
+			* Now, our chunk.memory points to a memory block that is chunk.size
+			* bytes big and contains the remote file.
+			*
+			* Do something nice with it!
+			*/
+
+			printf("%lu bytes retrieved\n", (long)chunk.size);
+		}
 		curl_easy_cleanup(curl);
+		if (chunk.memory){
+			free(chunk.memory);
+		}
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, url);
+		/* we're done with libcurl, so clean it up */
+		curl_global_cleanup();
 	}
 }
 
 void *serveItUp()
 {
-		/* Since this program depends on libcurl, you may need to
+	/* Since this program depends on libcurl, you may need to
 	* install libcurl4-gnutls-dev.
 	*
 	* On Linux Mint, this can be done by running:
@@ -507,13 +583,13 @@ void *serveItUp()
 	const int   id = 6;
 	const char* password = "jcn";
 	const char* name = "IMBANANA";
-	const int   adcval = ADC;
+	const float   adcval = ADC;
 	const char* status = STATUS;
-	const char* timestamp = "20141116-09:12:34";
+	const char* timestamp = TIME;
 
 
 	char buf[1024];
-	snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%d&status=%s&timestamp=%s",
+	snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%lf&status=%s&timestamp=%s",
 		hostname,
 		port,
 		id,
@@ -528,6 +604,50 @@ void *serveItUp()
 }
 // HTTP_GET INSIDE
 
+void *keepPosting(){
+	//pthread_mutex_lock(&adc_mutex);
+	while(1){
+		
+		i2cTime();
+		MSG_GET();
+		pthread_mutex_lock(&adc_mutex);
+		delay(5000);
+		const char* hostname = "129.63.205.75";
+		const int   port = 8000;
+		const int   id = 6;
+		const char* password = "jcn";
+		const char* name = "IMBANANA";
+		const float   adcval = ADC;
+		const char* status = "Online";
+		const char* timestamp = TIME;
+
+		
+
+		char buf[1024];
+		snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%lf&status=%s&timestamp=%s",
+			hostname,
+			port,
+			id,
+			password,
+			name,
+			adcval,
+			status,
+			timestamp);
+		HTTP_GET(buf);
+		pthread_mutex_unlock(&adc_mutex);
+		
+	}
+	
+	
+
+}
+/*
+while(1)
+{
+	pthread_create(&tid[],NULL,
+}
+*/
+
 void *command()
 {
 	int input;
@@ -536,7 +656,7 @@ void *command()
 
 	while (val)
 	{
-		printf("0. RESET SENSOR\n");
+		printf("\n0. RESET SENSOR\n");
 		printf("1. PING SENSOR\n");
 		printf("2. GET ADC VALUE\n");
 		printf("3. Exit\n");
@@ -576,17 +696,6 @@ void *command()
 	}
 }
 
-/*
-Sensors control ()
-
-- it passes in value of something....
-- it will be determining what commands will be input.
-
-- will be called in by msg_get or so on.....
-
-
-*/
-
 
 int main(void)
 {
@@ -600,31 +709,33 @@ int main(void)
 		int fileHandleGPIO_S;
 		fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT, GPIO_STRONG);
 		writeGPIO(fileHandleGPIO_S, 1); 
-		
-		serveItUp();
-		/*Semaphore starter
-		*/
-		
-		
-		/*=========================================
-		this is where i left off:
-
-		- mutex has to be init in different fuctions
-		- so is semaphore
-
-		there will be command-thread and other instructions running, so we might need either just mutex or mutex with semaphore
-
-		===========================================
-		*/
+	
 
 
 		/*Creating this user command thread
 		*/
 		pthread_create(&tid[0], NULL, &command, NULL);
+		
+		/*
+			will constantly uploading the server
+			using the thread that will
+			requires to lock the mutex of the ADC and Time Value 
+
+	
+
+		*/
+
+
+		pthread_create(&tid[5], NULL, keepPosting, NULL);// This will keep posting the adc and time
 
 		/*Waiting for command thread to finsih*/
 		//for (m = 0; m <= NUM_THREADS; m++){
 		pthread_join(tid[0], NULL);
+		pthread_join(tid[1], NULL);
+		pthread_join(tid[2], NULL);
+		pthread_join(tid[3], NULL);
+		pthread_join(tid[4], NULL);
+		pthread_join(tid[5], NULL);
 		//}
 		
 		return 0;
