@@ -4,7 +4,6 @@
  * 
  * Created on September 19, 2014, 1:16 AM
  */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -21,7 +20,6 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-
 #define Strobe (26) // IO8
 #define GP_4 (28) // IO4
 #define GP_5 (17) // IO5
@@ -32,711 +30,603 @@
 #define GPIO_STRONG (1)
 #define GPIO_PULLUP (0)
 #define ERROR (-1)
-
 #define SELECT_GPIO_I2C (29) //Select between GPIO and I2C
-
 #define RTC_SDA  (21) //A4
 #define RTC_SCL  (20)  //A5
-
 #define NUM_THREADS 20
-
-
+/*================== Global vaiable===============
+ */
 char *STATUS;
 float ADC;
 char TIME[1024];
-
 /*================== thread id===============
-*/
+ */
 pthread_t tid[NUM_THREADS];
 pthread_mutex_t time_mutex;
 pthread_mutex_t adc_mutex;
-
-//=============================================
-
+//===========================================
 int fileHandleGPIO_4;
 int fileHandleGPIO_5;
 int fileHandleGPIO_6;
 int fileHandleGPIO_7;
 int fileHandleGPIO_S;
+//===========================================
 struct MemoryStruct {
-	char *memory;
-	size_t size;
+    char *memory;
+    static size_t size;
 };
-static size_t
-WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
-	size_t realsize = size * nmemb;
-	struct MemoryStruct *mem = (struct MemoryStruct *)userp;
-
-	mem->memory = realloc(mem->memory, mem->size + realsize + 1);
-	if (mem->memory == NULL) {
-		/* out of memory! */
-		printf("not enough memory (realloc returned NULL)\n");
-		return 0;
-	}
-
-	memcpy(&(mem->memory[mem->size]), contents, realsize);
-	mem->size += realsize;
-	mem->memory[mem->size] = 0;
-
-	return realsize;
+WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    struct MemoryStruct *mem = (struct MemoryStruct *) userp;
+    mem->memory = realloc(mem->memory, mem->size + realsize + 1);
+    if (mem->memory == NULL) {
+        /* out of memory! */
+        printf("not enough memory (realloc returned NULL)\n");
+        return 0;
+    }
+    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
+    return realsize;
 }
-//utility functions
-void delay(int milliseconds)
-{
-    long pause;
-    clock_t now,then;
-
-    pause = milliseconds*(CLOCKS_PER_SEC/1000);
+/*---------- D E L A Y( ) ---------------
+        Description: Stall for time
+        Return nothing
+ */
+void delay(int milliseconds) {
+    long pause; // initialization
+    clock_t now, then;
+    pause = milliseconds * (CLOCKS_PER_SEC / 1000);
     now = then = clock();
-    while( (now-then) < pause )
+    while ((now - then) < pause)
         now = clock();
 }
-
-void decimal_to_binary(int decimal, char *bin_array)
-{
-	int k = 3;
-	
-	while (k >= 0){ 
-		if (decimal >= pow(2, k)){ 
-			bin_array[k] = '1'; 
-			decimal = decimal - pow(2, k); 
-			k--;
-		}
-		else{
-			bin_array[k] = '0'; 
-			k--;
-		}
-	}
-}
-
-int binary_to_decimal(char *bin_array)
-{
-	int j;
-	int temp = 0;
-	for (j = 0; j < 4; j++)
-	{
-		if (bin_array[j] == '1')
-		{
-			temp = temp + pow(2, j);
-		}
-	}
-	
-	return temp;
-
-}
-
-//***************************************************************
-
-//open GPIO and set the direction
-int openGPIO(int gpio, int direction, int drive )
-{	
-		char buffer[256]; 
-		int fileHandle; 
-		int fileMode;  
-
-		//Export GPIO
-		fileHandle = open("/sys/class/gpio/export", O_WRONLY); 
-		if (ERROR == fileHandle) 
-		{
-			puts("Error: Unable to opening /sys/class/gpio/export");
-			return(-1);
-		}
-
-		sprintf(buffer, "%d", gpio); 
-		write(fileHandle, buffer, strlen(buffer)); 
-		close(fileHandle); 
-
-		//Direction GPIO
-		sprintf(buffer, "/sys/class/gpio/gpio%d/direction", gpio); 
-		fileHandle = open(buffer, O_WRONLY); 
-		if (ERROR == fileHandle) 
-		{
-			puts("Unable to open file:");
-			puts(buffer);
-			return(-1);
-		}
-
-		if (direction == GPIO_DIRECTION_OUT) 
-		{
-			// Set out direction and strong drive
-			write(fileHandle, "out", 3); 
-			
-			fileMode = O_WRONLY; 
-			
-		}
-		else //GPIP port is input
-		{
-			// Set in direction
-			write(fileHandle, "in", 2); //Write in to config file
-		
-			fileMode = O_RDONLY; //File is read only
-			
-		}
-		close(fileHandle); //Close file
-		
-		//drive GPIO
-	        sprintf(buffer, "/sys/class/gpio/gpio%d/drive", gpio);
-	        fileHandle = open(buffer, O_WRONLY );
-	        if(ERROR == fileHandle)
-	        {
-	               puts("Unable to open file:");
-	               puts(buffer);
-	               return(-1);
-	        }
-	 
-	        if (drive == GPIO_STRONG)
-	        {
-	               // set strong
-	               write(fileHandle, "strong", 6);
-	               
-	        }
-	        else
-	        {
-	               // set pullup
-	               write(fileHandle, "pullup", 6);
-	               
-	        }
-			
-		
-			
-	        close(fileHandle );
-		
-
-
-		//Open GPIO for Read / Write
-		sprintf(buffer, "/sys/class/gpio/gpio%d/value", gpio); //Write file address to buffer
-		fileHandle = open(buffer, fileMode); //Open file with specified access type
-		if (ERROR == fileHandle) //Error handling if can't open file
-		{
-			puts("Unable to open file:");
-			puts(buffer);
-			return(-1);
-		}
-
-		return(fileHandle);  //Return int of creation status
-}
-
-
-void GPIO_IN(void)
-{
-	fileHandleGPIO_4 = openGPIO(GP_4, GPIO_DIRECTION_IN, GPIO_PULLUP );
-	fileHandleGPIO_5 = openGPIO(GP_5, GPIO_DIRECTION_IN, GPIO_PULLUP);
-	fileHandleGPIO_6 = openGPIO(GP_6, GPIO_DIRECTION_IN, GPIO_PULLUP);
-	fileHandleGPIO_7 = openGPIO(GP_7, GPIO_DIRECTION_IN, GPIO_PULLUP);
-	fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT,GPIO_STRONG);
-}
-
-void GPIO_OUT(void)
-{
-	fileHandleGPIO_4 = openGPIO(GP_4, GPIO_DIRECTION_OUT,GPIO_STRONG);
-	fileHandleGPIO_5 = openGPIO(GP_5, GPIO_DIRECTION_OUT,GPIO_STRONG);
-	fileHandleGPIO_6 = openGPIO(GP_6, GPIO_DIRECTION_OUT,GPIO_STRONG);
-	fileHandleGPIO_7 = openGPIO(GP_7, GPIO_DIRECTION_OUT,GPIO_STRONG);
-	fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT,GPIO_STRONG);
-}
-
-int closeGPIO(int gpio, int fileHandle)
-{
-	char buffer[256];
-	close(fileHandle); //This is the file handle of opened GPIO for Read / Write earlier.
-	fileHandle = open("/sys/class/gpio/unexport", O_WRONLY);
-
-	if(ERROR == fileHandle)
-	{
-		puts("Unable to open file:");
-		puts(buffer);
-		return(-1);
-	}
-	
-	sprintf(buffer, "%d", gpio);
-	write(fileHandle, buffer, strlen(buffer));
-	close(fileHandle);
-	return(0);
-}
-
-char readGPIO(int fileHandle) 
-{
-	char bits_buffer[2]; 
-	read(fileHandle, bits_buffer, 4); 
-	
-	return(bits_buffer[0]); 
-}
-
-int writeGPIO(int fileHandle, int val) 
-{
-	if (val == 0)
-	{
-		// Set GPIO low status
-		write(fileHandle, "0", 1);
-	}
-	else
-	{
-		// Set GPIO high status
-		write(fileHandle, "1", 1);
-	}
-	return(0);
-}
-
-void bus_write(int msg){ 
-
-	GPIO_OUT();
-	int i = 0;
-	char bits_Buffer[4]; 
-	
-	//Strobe low PIC gets ready
-	writeGPIO(fileHandleGPIO_S, 0); 
-
-	decimal_to_binary(msg, bits_Buffer); 
-
-	//Write to Data bus
-	writeGPIO(fileHandleGPIO_4, (bits_Buffer[0] - '0')); 
-	writeGPIO(fileHandleGPIO_5, (bits_Buffer[1] - '0'));
-	writeGPIO(fileHandleGPIO_6, (bits_Buffer[2] - '0'));
-	writeGPIO(fileHandleGPIO_7, (bits_Buffer[3] - '0')); 
-	
-	//Strobe High tell PIC all done writing
-	writeGPIO(fileHandleGPIO_S, 1); 
-
-	delay(10);
-	
-	//Strobe Low Operation complete
-	writeGPIO(fileHandleGPIO_S, 0);
-
-	//Reset Strobe
-	writeGPIO(fileHandleGPIO_S, 1); 
-}
-
-int bus_read(){ 
-	GPIO_IN();
-
-	char bits_Buffer[4];
-	int value = 0; 
-
-	writeGPIO(fileHandleGPIO_S, 0); 
-
-	//Read bus
-	bits_Buffer[0] = readGPIO(fileHandleGPIO_4); 
-	bits_Buffer[1] = readGPIO(fileHandleGPIO_5);
-	bits_Buffer[2] = readGPIO(fileHandleGPIO_6);
-	bits_Buffer[3] = readGPIO(fileHandleGPIO_7); 
-
-	writeGPIO(fileHandleGPIO_S, 1);
-	delay(10);
-	writeGPIO(fileHandleGPIO_S, 0);
-	delay(10);
-
-	writeGPIO(fileHandleGPIO_S, 1);
-
-	return binary_to_decimal(bits_Buffer);
-}
-
-void *sensor(void *cmd){
-	if (cmd == "1"){//ping
-		int PIC_Response = 0;
-
-		bus_write(1);
-		delay(10);
-		PIC_Response = bus_read();
-
-		//14 = E
-		if (PIC_Response == 14)
-		{
-			STATUS = "PIC+PING";
-			printf("Received PING Acknowledgement from PIC\n\n\n");
-			//STATUS[0] = "PIC_PING_ACK";
-
-		}
-		else
-		{
-			printf("Error PING to PIC\n\n\n");
-		}
-		cmd == "5";
-
-	}
-
-	if (cmd == "2"){//get
-		
-		int i;
-		int bit_nibble[4]; //4 bit nibble
-		float voltage = 0;
-		bus_write(2);
-		delay(10);
-
-		for (i = 0; i < 4; i++)
-		{
-			bit_nibble[i] = bus_read();
-			delay(10);
-		}
-		printf("ADC value: ");
-		STATUS = "ADC+OK";
-		for (i = 0; i < 3; i++)
-		{
-			printf("%X", bit_nibble[i]);
-			//ADC[i] = bit_nibble[i];
-			voltage += bit_nibble[i];
-		//	voltage += pow(2, bit_nibble[i]);
-			ADC += 1 ;
-			//strcat(ADC[i], bit_nibble[i]);
-		}
-	//	voltage += pow(2, bit_nibble[0]);
-		voltage = voltage / 7;
-		ADC = voltage;
-		printf("\nThe voltage level:%f\n", voltage);
-		printf("\n");
-		cmd == "5";
-	}
-
-
-	if (cmd == "0"){//reset
-		int PIC_Response = 0;
-
-		bus_write(0);
-		delay(10);
-		PIC_Response = bus_read();
-		/* There will be a new fuction that will call bus_read or bus write
-		*/
-
-
-		if (PIC_Response == 14)
-		{
-			STATUS = "PIC+RESET";
-			printf("Received RESET Acknowledgement from PIC\n\n\n");
-		}
-		else{
-			printf("Error RESET to PIC\n\n\n");
-		}
-		cmd == "5";
-
-	}
-	
-}
-
-void MSG_PING(void)
-{ 
-	pthread_create(&tid[1], NULL, &sensor, "1");
-	
-}
-//14 = E
-void MSG_RESET(void)
-{ 
-	 pthread_create(&tid[3], NULL, &sensor, "0");
-}
-
-void MSG_GET(void){ 
-
-	//call sensor
-	pthread_create(&tid[2], NULL, &sensor, "2");
-
-}
-
-
-char bin2bcd(char binary_value){
-
-  char temp;
-  char retval;
-
-  temp = binary_value;
-  retval = 0;
-  while(1){
-    if(temp >= 10){
-      temp -= 10;
-      retval += 0x10;
-    }else{
-      retval += temp;
-      break;
+/*---------- D E C I M A L_2_B I N A R Y --------------- 
+        Desciption: converting decimal to binary
+        Return: Binary value
+ */
+void decimal_to_binary(int decimal, char *bin_array) {
+    int k = 3;
+    while (k >= 0) {
+        if (decimal >= pow(2, k)) {
+            bin_array[k] = '1';
+            decimal = decimal - pow(2, k);
+            k--;
+        } else {
+            bin_array[k] = '0';
+            k--;
+        }
     }
-  }
-  return(retval);
 }
-
-char bcd2bin(char bcd_value){
-
-  char temp;
-
-  temp = bcd_value;
-  temp >>= 1;
-  temp &= 0x78;
-  return(temp + (temp >> 2) + (bcd_value & 0x0f));
+/* ---------- B I N A R Y_2_D E C I M A L --------------- 
+        Desciption: Binary decimal to Decimal
+        Return: decimal value
+ */
+int binary_to_decimal(char *bin_array) {
+    int j;
+    int temp = 0;
+    for (j = 0; j < 4; j++) {
+        if (bin_array[j] == '1') {
+            temp = temp + pow(2, j);
+        }
+    }
+    return temp;
 }
-
-void i2cTime()
-{
-
+/*  ---------- O P E N _ G P I O ---------------
+        Description : These steps are implemented using the openGPIO function, 
+                                which opens the corresponding file and 
+                                returns this file identifier for future reading or writing, 
+                                depending on the direction declared.
+        Return: fileHandle or the GPIO
+ */
+int openGPIO(int gpio, int direction, int drive) {
+    char buffer[256];
+    int fileHandle;
+    int fileMode;
+    //Export GPIO
+    fileHandle = open("/sys/class/gpio/export", O_WRONLY);
+    if (ERROR == fileHandle) {
+        puts("Error: Unable to opening /sys/class/gpio/export");
+        return (-1);
+    }
+    sprintf(buffer, "%d", gpio);
+    write(fileHandle, buffer, strlen(buffer));
+    close(fileHandle);
+    //Direction GPIO
+    sprintf(buffer, "/sys/class/gpio/gpio%d/direction", gpio);
+    fileHandle = open(buffer, O_WRONLY);
+    if (ERROR == fileHandle) {
+        puts("Unable to open file:");
+        puts(buffer);
+        return (-1);
+    }
+    if (direction == GPIO_DIRECTION_OUT) {
+        // Set out direction and strong drive
+        write(fileHandle, "out", 3);
+        fileMode = O_WRONLY;
+    } else //GPIP port is input
+    {
+        // Set in direction
+        write(fileHandle, "in", 2); //Write in to config file
+        fileMode = O_RDONLY; //File is read only
+    }
+    close(fileHandle); //Close file
+    //drive GPIO
+    sprintf(buffer, "/sys/class/gpio/gpio%d/drive", gpio);
+    fileHandle = open(buffer, O_WRONLY);
+    if (ERROR == fileHandle) {
+        puts("Unable to open file:");
+        puts(buffer);
+        return (-1);
+    }
+    if (drive == GPIO_STRONG) {
+        // set strong
+        write(fileHandle, "strong", 6);
+    } else {
+        // set pullup
+        write(fileHandle, "pullup", 6);
+    }
+    close(fileHandle);
+    //Open GPIO for Read / Write
+    sprintf(buffer, "/sys/class/gpio/gpio%d/value", gpio); //Write file address to buffer
+    fileHandle = open(buffer, fileMode); //Open file with specified access type
+    if (ERROR == fileHandle) //Error handling if can't open file
+    {
+        puts("Unable to open file:");
+        puts(buffer);
+        return (-1);
+    }
+    return (fileHandle); //Return int of creation status
+}
+/* ---------- G P I O _ I N --------------- 
+        Description: Setting the value for GPIO to READING MODE
+                ready to receive input from PIC	
+        Return nothing
+ */
+void GPIO_IN(void) {
+    fileHandleGPIO_4 = openGPIO(GP_4, GPIO_DIRECTION_IN, GPIO_PULLUP);
+    fileHandleGPIO_5 = openGPIO(GP_5, GPIO_DIRECTION_IN, GPIO_PULLUP);
+    fileHandleGPIO_6 = openGPIO(GP_6, GPIO_DIRECTION_IN, GPIO_PULLUP);
+    fileHandleGPIO_7 = openGPIO(GP_7, GPIO_DIRECTION_IN, GPIO_PULLUP);
+    fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT, GPIO_STRONG);
+}
+/* ---------- G P I O _ O U T --------------- 
+        Description: Setting the value for GPIO to WRITING MODE
+                ready to write the output to PIC
+        Return nothing*/
+void GPIO_OUT(void) {
+    fileHandleGPIO_4 = openGPIO(GP_4, GPIO_DIRECTION_OUT, GPIO_STRONG);
+    fileHandleGPIO_5 = openGPIO(GP_5, GPIO_DIRECTION_OUT, GPIO_STRONG);
+    fileHandleGPIO_6 = openGPIO(GP_6, GPIO_DIRECTION_OUT, GPIO_STRONG);
+    fileHandleGPIO_7 = openGPIO(GP_7, GPIO_DIRECTION_OUT, GPIO_STRONG);
+    fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT, GPIO_STRONG);
+}
+/*  ---------- O P E N _ G P I O ---------------
+        Description : These steps are implemented using the closeGPIO function, 
+                                which close the corresponding file and 
+                                returns this file identifier 				
+        Return: 0
+ */
+int closeGPIO(int gpio, int fileHandle) {
+    char buffer[256];
+    close(fileHandle); //This is the file handle of opened GPIO for Read / Write earlier.
+    fileHandle = open("/sys/class/gpio/unexport", O_WRONLY);
+    if (ERROR == fileHandle) {
+        puts("Unable to open file:");
+        puts(buffer);
+        return (-1);
+    }
+    sprintf(buffer, "%d", gpio);
+    write(fileHandle, buffer, strlen(buffer));
+    close(fileHandle);
+    return (0);
+}
+/*---------- R E A D _ G P I O --------------- 
+        Description: The GPIO reading logic is as follows.
+        Return: digital value for that GPIO
+ */
+char readGPIO(int fileHandle) {
+    char bits_buffer[2];
+    read(fileHandle, bits_buffer, 4);
+    return (bits_buffer[0]);
+}
+/* ---------- W R I T E _ G P I O --------------- 
+        Description:	Manually set the GPIO of the pin
+                                to either 1 or 0;
+        Return nothing
+ */
+int writeGPIO(int fileHandle, int val) {
+    if (val == 0) {
+        // Set GPIO low status
+        write(fileHandle, "0", 1);
+    } else {
+        // Set GPIO high status
+        write(fileHandle, "1", 1);
+    }
+    return (0);
+}
+/* ---------- B U S _ W R I T E ( ) --------------- 
+        Description:	Manually set the GPIO of the pin
+                                to either 1 or 0;
+        Return nothing
+ */
+void bus_write(int msg) {
+    GPIO_OUT(); // SET GALILEO PIN TO WRITE MODE
+    /*Initialization*/
+    int i = 0;
+    char bits_Buffer[4];
+    //Strobe low PIC gets ready
+    writeGPIO(fileHandleGPIO_S, 0);
+    decimal_to_binary(msg, bits_Buffer);
+    //Write to Data bus
+    writeGPIO(fileHandleGPIO_4, (bits_Buffer[0] - '0'));
+    writeGPIO(fileHandleGPIO_5, (bits_Buffer[1] - '0'));
+    writeGPIO(fileHandleGPIO_6, (bits_Buffer[2] - '0'));
+    writeGPIO(fileHandleGPIO_7, (bits_Buffer[3] - '0'));
+    //Strobe High tell PIC all done writing
+    writeGPIO(fileHandleGPIO_S, 1);
+    delay(10);
+    //Strobe Low Operation complete
+    writeGPIO(fileHandleGPIO_S, 0);
+    //Reset Strobe
+    writeGPIO(fileHandleGPIO_S, 1);
+}
+/* ---------- B U S _ R E A D( ) --------------- 
+        Description:	
+        Return nothing
+ */
+int bus_read() {
+    GPIO_IN();
+    char bits_Buffer[4];
+    int value = 0;
+    writeGPIO(fileHandleGPIO_S, 0); // set strobe to low
+    //Read bus from pin 4- 7
+    bits_Buffer[0] = readGPIO(fileHandleGPIO_4);
+    bits_Buffer[1] = readGPIO(fileHandleGPIO_5);
+    bits_Buffer[2] = readGPIO(fileHandleGPIO_6);
+    bits_Buffer[3] = readGPIO(fileHandleGPIO_7);
+    writeGPIO(fileHandleGPIO_S, 1); //strobe hi
+    delay(10);
+    writeGPIO(fileHandleGPIO_S, 0); // strobe lo
+    delay(10);
+    writeGPIO(fileHandleGPIO_S, 1); // strobe hi
+    return binary_to_decimal(bits_Buffer);
+}
+/* ---------- S E N S O R ( ) --------------- 
+        Description:	Detecting the command from Galileo
+        Return nothing
+ */
+void *sensor(void *cmd) {
+    if (cmd == "1") {//if the command is PING (1)
+        int PIC_Response = 0;
+        bus_write(1); // turn the data bus to write mode
+        delay(10);
+        PIC_Response = bus_read(); // store input into PIC_REsponse
+        if (PIC_Response == 14) {
+            STATUS = "PIC+PING";
+            printf("Received PING Acknowledgement from PIC\n\n\n");
+        } else {
+            printf("Error PING to PIC\n\n\n");
+        }
+        cmd == "5";
+    }
+    if (cmd == "2") {//if the command is GET (2)
+        int i;
+        int bit_nibble[4]; //4 bit nibble
+        float voltage = 0;
+        bus_write(2);
+        delay(10);
+        for (i = 0; i < 4; i++) {
+            bit_nibble[i] = bus_read();
+            delay(10);
+        }
+        printf("ADC value: ");
+        STATUS = "ADC+OK";
+        for (i = 0; i < 3; i++) {
+            printf("%X", bit_nibble[i]);
+            voltage += bit_nibble[i];
+            ADC += 1;
+        }
+        voltage = voltage / 7;
+        ADC = voltage;
+        printf("\nThe voltage level:%f\n", voltage);
+        printf("\n");
+        cmd == "5";
+    }
+    if (cmd == "0") {//reset
+        int PIC_Response = 0;
+        bus_write(0);
+        delay(10);
+        PIC_Response = bus_read();
+        /* There will be a new fuction that will call bus_read or bus write
+         */
+        if (PIC_Response == 14) {
+            STATUS = "PIC+RESET";
+            printf("Received RESET Acknowledgement from PIC\n\n\n");
+        } else {
+            printf("Error RESET to PIC\n\n\n");
+        }
+        cmd == "5";
+    }
+}
+/* ---------- M S G _ P I N G ( ) --------------- 
+        Description:	Run Sensor thread
+        Return nothing
+ */
+void MSG_PING(void) {
+    pthread_create(&tid[1], NULL, &sensor, "1");
+}
+/* ---------- M S G _ R E S E T ( ) --------------- 
+        Description:	Run Sensor thread
+        Return nothing
+ */
+void MSG_RESET(void) {
+    pthread_create(&tid[3], NULL, &sensor, "0");
+}
+/* ---------- M S G _ G E T ( ) --------------- 
+        Description:	Run Sensor thread
+        Return nothing
+ */
+void MSG_GET(void) {
+    //call sensor
+    pthread_create(&tid[2], NULL, &sensor, "2");
+}
+/* ---------- B I N  T O  B C D ( ) --------------- 
+ */
+char bin2bcd(char binary_value) {
+    /*Initialization*/
+    char temp;
+    char retval;
+    temp = binary_value;
+    retval = 0;
+    while (1) {
+        if (temp >= 10) {
+            temp -= 10;
+            retval += 0x10;
+        } else {
+            retval += temp;
+            break;
+        }
+    }
+    return (retval);
+}
+/* ---------- B C D  T O  B I N ( ) --------------- 
+ */
+char bcd2bin(char bcd_value) {
+    char temp;
+    temp = bcd_value;
+    temp >>= 1;
+    temp &= 0x78;
+    return (temp + (temp >> 2) + (bcd_value & 0x0f));
+}
+/* ---------- I 2 C T I M E ( ) --------------- 
+        Description:	Getting time from the RTC circuit and store them in
+					the buffer to be ready to send up to the server
+        Return nothing
+ */
+void i2cTime() {
+    //Initialization======
 	int i;
-	int r;
-	int fd;
-	int x;
+    int r;
+    int fd;
+    int x;
 	int WTF;
-	char command[2];
-	char value[8];
-	char year[1024];
-
-        char *dev = "/dev/i2c-0";
-        int addr = 0x68;
-		
-		fd = open(dev, O_RDWR );
-        if(fd < 0)
-        {
-                perror("Opening i2c device node\n");
-               // return 1;
+    char command[2];
+    char value[8];
+    char year[1024];
+    char *dev = "/dev/i2c-0";
+    int addr = 0x68;
+	  float data1;
+    char number;
+	//====================
+    fd = open(dev, O_RDWR); // open the file for read and write
+    if (fd < 0) { // if unable to open the file
+        perror("Opening i2c device node\n"); // error message
+    }
+    r = ioctl(fd, I2C_SLAVE, addr);
+    if (r < 0) {
+        perror("Selecting i2c device\n");
+    }
+    char buff[4] = {0};
+    command[0] = 0x00;
+    if (write(fd, command, 1) != 1) {
+        perror("writing\n");
+    }
+    delay(200);
+    for (i = 0; i < 8; i++) {
+        x = read(fd, &value[i], 1);
+        if (x != 1) {
+            perror("reading i2c device\n");
         }
-		
-		r = ioctl(fd, I2C_SLAVE, addr);
-        if(r < 0)
-        {
-                perror("Selecting i2c device\n");
+        delay(200);
+    }
+    printf("System Time:%02X:%02X:%02X, Day:%X,  %X/%X/20%X\n", value[2], value[1], value[0], value[3], value[5], value[4], value[6]);
+    printf("Time for upload:\n");
+    WTF = sprintf(TIME, "20%X%X%X-%02X:%02X:%02X", value[6], value[5], value[4], value[2], value[1], value[0]);
+    close(fd);
+}
+/* ---------- H T T P _ G E T ( ) --------------- 
+        Description:	This function will use the libcurl library
+					APIs to send request and parse the HTML page
+        Return nothing
+ */
+void HTTP_GET(const char* url) {
+    CURL *curl;
+    CURLcode res;
+    struct MemoryStruct chunk;
+    chunk.memory = malloc(1); /* will be grown as needed by the realloc above */
+    chunk.size = 0; /* no data at this point */
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        /* send all data to this function  */
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+        /* we pass our 'chunk' struct to the callback function */
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *) &chunk);
+        //get it
+        res = curl_easy_perform(curl);
+        /* check for errors */
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                    curl_easy_strerror(res));
+        } else {
+            /*
+             * Now, our chunk.memory points to a memory block that is chunk.size
+             * bytes big and contains the remote file.
+             * Do something nice with it!
+             */
+            printf("%lu bytes retrieved\n", (long) chunk.size);
         }
-		
-		char buff[4] = {0};
-	    float data1;
-		char number;
-		
-		
-		command[0] = 0x00;
-		if(write(fd, command, 1) != 1)
-		{
-			 perror("writing\n");
-		}
-		delay(200);
-		
-		for(i = 0; i < 8; i++)
-			{
-                x = read(fd, &value[i], 1);
-                if(x != 1)
-                    {
-                        perror("reading i2c device\n");
-                    }
-                    delay(200);
-			}  
-				
-				
-                printf("System Time:%02X:%02X:%02X, Day:%X,  %X/%X/20%X\n", value[2],value[1],value[0],value[3],value[5],value[4], value[6]);
-				printf("Time for upload:\n");
-			    //strcpy(year, "20");
-				//strcat(year, value[6]);
-				//int WTF = binary_to_decimal((char *)value[6]);
-				//printf("%c\n\n\n\n\n\n\n", year);
-				WTF = sprintf(TIME,"20%X%X%X-%02X:%02X:%02X", value[6], value[5],value[4], value[2], value[1], value[0]);
-				//printf("%s",TIME);
-		
-	close(fd);
+        curl_easy_cleanup(curl);
+		//Free all the left over memeory
+        if (chunk.memory) {
+            free(chunk.memory);
+        }
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, url);
+        /* we're done with libcurl, so clean it up */
+        curl_global_cleanup();
+    }
 }
-
-void HTTP_GET(const char* url){
-	CURL *curl;
-	CURLcode res;
-
-	struct MemoryStruct chunk;
-
-	chunk.memory = malloc(1);  /* will be grown as needed by the realloc above */
-	chunk.size = 0;    /* no data at this point */
-
-	curl_global_init(CURL_GLOBAL_ALL);
-
-	curl = curl_easy_init();
-	if (curl) {
-		curl_easy_setopt(curl, CURLOPT_URL, url);
-		/* send all data to this function  */
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-
-		/* we pass our 'chunk' struct to the callback function */
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-		//get it
-		res = curl_easy_perform(curl);
-		/* check for errors */
-		if (res != CURLE_OK) {
-			fprintf(stderr, "curl_easy_perform() failed: %s\n",
-				curl_easy_strerror(res));
-		}
-		else {
-			/*
-			* Now, our chunk.memory points to a memory block that is chunk.size
-			* bytes big and contains the remote file.
-			*
-			* Do something nice with it!
-			*/
-
-			printf("%lu bytes retrieved\n", (long)chunk.size);
-		}
-		curl_easy_cleanup(curl);
-		if (chunk.memory){
-			free(chunk.memory);
-		}
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, url);
-		/* we're done with libcurl, so clean it up */
-		curl_global_cleanup();
-	}
+/* ---------- S E R V E I T U P ( ) --------------- 
+        Description:	This function will use the libcurl library
+					APIs to send request and parse the HTML page 
+        Return nothing
+ */
+void *serveItUp() {
+    /* Since this program depends on libcurl, you may need to
+     * install libcurl4-gnutls-dev.
+     *
+     * On Linux Mint, this can be done by running:
+     * sudo apt-get install libcurl4-gnutls-dev
+     */
+	 //Initialization
+    const char* hostname = "129.63.205.75"; // the IP of the webserver
+    const int port = 8000;
+    const int id = 6;
+    const char* password = "jcn";
+    const char* name = "IMBANANA"; // name of our group
+    const float adcval = ADC; // the adc value from 
+    const char* status = STATUS;
+    const char* timestamp = TIME;
+    char buf[1024];
+	//=============
+    snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%lf&status=%s&timestamp=%s",
+            hostname,
+            port,
+            id,
+            password,
+            name,
+            adcval,
+            status,
+            timestamp);
+    HTTP_GET(buf);
 }
-
-void *serveItUp()
-{
-	/* Since this program depends on libcurl, you may need to
-	* install libcurl4-gnutls-dev.
-	*
-	* On Linux Mint, this can be done by running:
-	* sudo apt-get install libcurl4-gnutls-dev
-	*/
-
-	const char* hostname = "129.63.205.75";
-	const int   port = 8000;
-	const int   id = 6;
-	const char* password = "jcn";
-	const char* name = "IMBANANA";
-	const float   adcval = ADC;
-	const char* status = STATUS;
-	const char* timestamp = TIME;
-
-
-	char buf[1024];
-	snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%lf&status=%s&timestamp=%s",
-		hostname,
-		port,
-		id,
-		password,
-		name,
-		adcval,
-		status,
-		timestamp);
-	HTTP_GET(buf);
-	
-	//return 0;
+/* ---------- K E E P _ P O S T I N G ( ) --------------- 
+        Description:	This function will use the libcurl library
+					APIs to send request and parse the HTML page
+					SAME AS SERVE IT UP but just keep posting through thread 
+					doesnt really need to be called.
+        Return nothing
+ */
+void *keepPosting() {
+    //pthread_mutex_lock(&adc_mutex);
+    while (1) {
+        i2cTime();
+        MSG_GET();
+        pthread_mutex_lock(&adc_mutex);
+        delay(5000);
+        const char* hostname = "129.63.205.75";
+        const int port = 8000;
+        const int id = 6;
+        const char* password = "jcn";
+        const char* name = "IMBANANA";
+        const float adcval = ADC;
+        const char* status = "Online";
+        const char* timestamp = TIME;
+        char buf[1024];
+        snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%lf&status=%s&timestamp=%s",
+                hostname,
+                port,
+                id,
+                password,
+                name,
+                adcval,
+                status,
+                timestamp);
+        HTTP_GET(buf);
+        pthread_mutex_unlock(&adc_mutex);
+    }
 }
-// HTTP_GET INSIDE
-
-void *keepPosting(){
-	//pthread_mutex_lock(&adc_mutex);
-	while(1){
-		
-		i2cTime();
-		MSG_GET();
-		pthread_mutex_lock(&adc_mutex);
-		delay(5000);
-		const char* hostname = "129.63.205.75";
-		const int   port = 8000;
-		const int   id = 6;
-		const char* password = "jcn";
-		const char* name = "IMBANANA";
-		const float   adcval = ADC;
-		const char* status = "Online";
-		const char* timestamp = TIME;
-
-		
-
-		char buf[1024];
-		snprintf(buf, 1024, "http://%s:%d/update?id=%d&password=%s&name=%s&data=%lf&status=%s&timestamp=%s",
-			hostname,
-			port,
-			id,
-			password,
-			name,
-			adcval,
-			status,
-			timestamp);
-		HTTP_GET(buf);
-		pthread_mutex_unlock(&adc_mutex);
-		
-	}
-	
-	
-
-}
-/*
-while(1)
-{
-	pthread_create(&tid[],NULL,
-}
-*/
-
-void *command()
-{
-	int input;
-	int i;
-	int val = 1;
-
-	while (val)
-	{
+/* ---------- C O M M A N D( ) --------------- 
+        Description:	The command function will control
+					the system by sending signal to PIC
+        Return nothing
+ */
+void *command() {
+    int input;
+    int i;
+    int val = 1;
+    while (val) {
+		// PROMPT for instructions
 		printf("\n0. RESET SENSOR\n");
-		printf("1. PING SENSOR\n");
-		printf("2. GET ADC VALUE\n");
-		printf("3. Exit\n");
-		printf("Selection: ");
-		scanf("%d", &input);
-		switch (input)
-		{
-		case 0:
-			MSG_RESET(); //RESET COMMAND
-			delay(1000);
-			//STATUS = "PIC+RESET";
-			//serveItUp();
-			pthread_create(&tid[4], NULL, serveItUp, NULL);
-			break;
-		case 1:
-			MSG_PING(); // PING COMMAND
-			delay(1000);
-			//serveItUp();
-			pthread_create(&tid[4], NULL, serveItUp, NULL);
-			break;	
-		case 2:         //GET COMMAND
-			MSG_GET();
-			i2cTime();
-			delay(1000);
-			pthread_create(&tid[4], NULL, serveItUp, NULL);
-			//serveItUp();
-			break;
-		case 3:
-			printf("Thanks bye\n");
-			val = 0;
-			break;
-		default:
-			printf("Bad input, quitting!\n");
-			break;
-		}
-
-	}
+        printf("1. PING SENSOR\n");
+        printf("2. GET ADC VALUE\n");
+        printf("3. Exit\n");
+        printf("Selection: ");
+        scanf("%d", &input);
+        switch (input) {
+            case 0:
+                MSG_RESET(); // send RESET COMMAND
+                delay(1000);
+                pthread_create(&tid[4], NULL, serveItUp, NULL); // upload to the server
+                break;
+            case 1:
+                MSG_PING(); // send PING COMMAND
+                delay(1000);
+                pthread_create(&tid[4], NULL, serveItUp, NULL);// upload to the server
+                break;
+            case 2: //GET COMMAND
+                MSG_GET(); // Send signal to get the ADC value
+                i2cTime();// get the time stamp when adc is recorded 
+                delay(1000);
+                pthread_create(&tid[4], NULL, serveItUp, NULL);// upload to the server
+                break;
+            case 3:
+                printf("Thanks bye\n"); // EXIT command is activated
+                val = 0;
+                break;
+            default:
+                printf("Bad input, quitting!\n");
+                break;
+        }
+    }
 }
-
-
-int main(void)
-{
-		int m = 0;
-
-		int fileHandleGPIO_Select;
-		fileHandleGPIO_Select = openGPIO(SELECT_GPIO_I2C, GPIO_DIRECTION_OUT, GPIO_STRONG);
-		writeGPIO(fileHandleGPIO_Select, 0);  
-		
-		//Set strobe high
-		int fileHandleGPIO_S;
-		fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT, GPIO_STRONG);
-		writeGPIO(fileHandleGPIO_S, 1); 
-	
-
-
-		/*Creating this user command thread
-		*/
-		pthread_create(&tid[0], NULL, &command, NULL);
-		
-		/*
-			will constantly uploading the server
-			using the thread that will
-			requires to lock the mutex of the ADC and Time Value 
-
-	
-
-		*/
-
-
-		pthread_create(&tid[5], NULL, keepPosting, NULL);// This will keep posting the adc and time
-
-		/*Waiting for command thread to finsih*/
-		//for (m = 0; m <= NUM_THREADS; m++){
-		pthread_join(tid[0], NULL);
-		pthread_join(tid[1], NULL);
-		pthread_join(tid[2], NULL);
-		pthread_join(tid[3], NULL);
-		pthread_join(tid[4], NULL);
-		pthread_join(tid[5], NULL);
-		//}
-		
-		return 0;
+int main(void) {
+    int m = 0;
+    int fileHandleGPIO_Select;
+    fileHandleGPIO_Select = openGPIO(SELECT_GPIO_I2C, GPIO_DIRECTION_OUT, GPIO_STRONG);
+    writeGPIO(fileHandleGPIO_Select, 0);
+    //Set strobe high
+    int fileHandleGPIO_S;
+    fileHandleGPIO_S = openGPIO(Strobe, GPIO_DIRECTION_OUT, GPIO_STRONG);
+    writeGPIO(fileHandleGPIO_S, 1);
+    /*Creating this user command thread
+     */
+    pthread_create(&tid[0], NULL, &command, NULL); // creating thread for command
+												   // will simutanously working while posting to server
+    /*
+            will constantly uploading the server
+            using the thread that will
+            requires to lock the mutex of the ADC and Time Value 
+     */
+    pthread_create(&tid[5], NULL, keepPosting, NULL); // This will keep posting the adc and time
+    /*Waiting for command thread to finsih*/
+    pthread_join(tid[0], NULL);
+    pthread_join(tid[1], NULL);
+    pthread_join(tid[2], NULL);
+    pthread_join(tid[3], NULL);
+    pthread_join(tid[4], NULL);
+    pthread_join(tid[5], NULL);
+    return 0;
 }
